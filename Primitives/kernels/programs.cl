@@ -94,7 +94,12 @@ void exscan_global(__global int* data, __global int* prefSum)
 __kernel
 void compact_predicate(__global int* data, __global int* pred)
 {
-        
+    int id = get_global_id(0);
+    if (data[id] < 50) {
+        pred[id] = 1;
+    } else {
+        pred[id] = 1;
+    }
 }
 
 // TODO
@@ -103,7 +108,12 @@ void compact_predicate(__global int* data, __global int* pred)
 __kernel
 void compact_exscan(__global int* pred, __global int* prefSum)
 {
-
+    int id = get_global_id(0);
+    prefSum[id] = 0;
+    int i = 0;
+    for (; i < id; ++i) {
+        prefSum[id] += pred[i];
+    }
 }
 
 // TODO
@@ -116,5 +126,10 @@ void compact_exscan(__global int* pred, __global int* prefSum)
 __kernel
 void compact_compact(__global int* data, __global int* pred, __global int* prefSum)
 {
-        
+    int id = get_global_id(0);
+    int value = data[id];
+    barrier(CLK_GLOBAL_MEM_FENCE);
+    if (pred[id]) {
+        data[prefSum[id]] = value;
+    }
 }

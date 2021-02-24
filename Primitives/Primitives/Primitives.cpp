@@ -210,7 +210,7 @@ void reduce(cl::Program& program, cl::Context& context, cl::CommandQueue& queue,
 	cl::Kernel kernel(program, "reduce_global", &err);
 	CheckCLError(err);
 
-	cl::Buffer clInputBuffer = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(float) * dataSize, NULL, &err);
+	cl::Buffer clInputBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(float) * dataSize, NULL, &err);
 	queue.enqueueWriteBuffer(clInputBuffer, true, 0, sizeof(float) * dataSize, hostBuffer.data());
 	kernel.setArg(0, clInputBuffer);
 
@@ -279,6 +279,124 @@ void exscan(cl::Program& program, cl::Context& context, cl::CommandQueue& queue,
 	//Validate
 
 	for (size_t index = 0; index < dataSize; ++index) {
+		if (hostBuffer[index] != control[index]) {
+			std::cout << index << " Wrong!" << std::endl;
+			break;
+		}
+	}
+}
+
+void compact(cl::Program& program, cl::Context& context, cl::CommandQueue& queue)
+{
+	const size_t dataSize = 4096;
+	cl_int err = CL_SUCCESS;
+
+	const int vmax = 100;
+	const int split = 50;
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_int_distribution<int> distr(0, vmax);
+	std::vector<int> hostBuffer;
+	for (size_t index = 0; index < dataSize; ++index)
+	{
+		hostBuffer.push_back(distr(gen));
+	}
+	std::vector<int> control;
+	Timer::measure([&]() {
+		for (int i : hostBuffer) {
+			if (i < split) {
+				control.push_back(i);
+			}
+		}
+		}, 1);
+
+	cl::Kernel firstKernel(program, "compact_predicate", &err);
+	CheckCLError(err);
+
+	cl::Buffer firstInputBuffer = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(int) * dataSize, NULL, &err);
+	queue.enqueueWriteBuffer(firstInputBuffer, true, 0, sizeof(int) * dataSize, hostBuffer.data());
+
+	// Allocate the output data
+	cl::Buffer firstResultBuffer = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(int) * dataSize, NULL, &err);
+
+	// Set the kernel parameters
+	firstKernel.setArg(0, firstInputBuffer);
+	firstKernel.setArg(1, firstResultBuffer);
+
+	// Enqueue the kernel
+	cl::Event event;
+	queue.enqueueNDRangeKernel(firstKernel,
+		cl::NullRange,
+		cl::NDRange(dataSize, 1),
+		cl::NullRange,
+		NULL,
+		&event);
+	event.wait();
+	printTimeStats(event);
+
+	std::vector<int> predicateBuffer(hostBuffer.size());
+	// Copy result back to host
+	queue.enqueueReadBuffer(firstResultBuffer, true, 0, sizeof(int) * dataSize, predicateBuffer.data());
+
+	cl::Kernel secondKernel(program, "compact_exscan", &err);
+	CheckCLError(err);
+
+	cl::Buffer secondInputBuffer = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(int) * dataSize, NULL, &err);
+	queue.enqueueWriteBuffer(secondInputBuffer, true, 0, sizeof(int) * dataSize, hostBuffer.data());
+
+	// Allocate the output data
+	cl::Buffer secondResultBuffer = cl::Buffer(context, CL_MEM_WRITE_ONLY, sizeof(int) * dataSize, NULL, &err);
+
+	// Set the kernel parameters
+	secondKernel.setArg(0, secondInputBuffer);
+	secondKernel.setArg(1, secondResultBuffer);
+
+	// Enqueue the kernel
+	queue.enqueueNDRangeKernel(secondKernel,
+		cl::NullRange,
+		cl::NDRange(dataSize, 1),
+		cl::NullRange,
+		NULL,
+		&event);
+	event.wait();
+	printTimeStats(event);
+
+	std::vector<int> prefSumBuffer(hostBuffer.size());
+	// Copy result back to host
+	queue.enqueueReadBuffer(secondResultBuffer, true, 0, sizeof(int) * dataSize, prefSumBuffer.data());
+
+	cl::Kernel thirdKernel(program, "compact_compact", &err);
+	CheckCLError(err);
+
+	cl::Buffer thirdInoutBuffer = cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(int) * dataSize, NULL, &err);
+	queue.enqueueWriteBuffer(thirdInoutBuffer, true, 0, sizeof(int) * dataSize, hostBuffer.data());
+
+	cl::Buffer fourthInput = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(int) * dataSize, NULL, &err);
+	queue.enqueueWriteBuffer(fourthInput, true, 0, sizeof(int) * dataSize, predicateBuffer.data());
+
+	cl::Buffer fifthInpt = cl::Buffer(context, CL_MEM_READ_ONLY, sizeof(int) * dataSize, NULL, &err);
+	queue.enqueueWriteBuffer(fifthInpt, true, 0, sizeof(int) * dataSize, prefSumBuffer.data());
+
+	// Set the kernel parameters
+	thirdKernel.setArg(0, thirdInoutBuffer);
+	thirdKernel.setArg(1, fourthInput);
+	thirdKernel.setArg(1, fifthInpt);
+
+	// Enqueue the kernel
+	queue.enqueueNDRangeKernel(thirdKernel,
+		cl::NullRange,
+		cl::NDRange(dataSize, 1),
+		cl::NullRange,
+		NULL,
+		&event);
+	event.wait();
+	printTimeStats(event);
+
+	// Copy result back to host
+	queue.enqueueReadBuffer(thirdInoutBuffer, true, 0, sizeof(int) * dataSize, hostBuffer.data());
+
+	//Validate
+	for (size_t index = 0; index <= control.size(); ++index) {
 		if (hostBuffer[index] != control[index]) {
 			std::cout << index << " Wrong!" << std::endl;
 			break;
