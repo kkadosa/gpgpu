@@ -87,12 +87,49 @@ void isosurface(const int width, const int height, __global float4* visualizatio
   eyeRay.direction.w = 0.0f;
 
   float4 color = (float4)(0.0f);
+  float4 lightDir = (float4)(0.3f, -2.0f, 0.0f, 0.0f);
+
+  //printf("%f %f %f\n", eyeRay.direction.x, eyeRay.direction.y, eyeRay.direction.z);
 
   float tnear, tfar;
   int hit = intersectBox(eyeRay.origin, eyeRay.direction, boxMin, boxMax, &tnear, &tfar);
   if(hit){
-    // TODO
-	color = (float4)(1.0f);
+      
+      float lastDensity = getDensityFromVolume(eyeRay.origin, resolution, volumeData);
+      float4 step = eyeRay.direction / resolution;
+      float4 next = eyeRay.origin + step;
+      int found = 0;
+      while ((next.z < 1.0) && !found) {
+          float nextDensity = getDensityFromVolume(next, resolution, volumeData);
+          if (lastDensity < nextDensity) {
+              if (lastDensity < isoValue && isoValue < nextDensity) {
+                  found = 1;
+              }
+          }
+          else {
+              if (nextDensity < isoValue && isoValue < lastDensity) {
+                  found = 1;
+              }
+          }
+          next = next + step;
+          lastDensity = nextDensity;
+      }
+      /* 1A
+      if (found) {
+          color = (float4)(1.0f);
+      }
+      */
+      /* 1B
+      if (found) {
+          float4 normal = getNormalFromVolume(next, resolution, volumeData);
+          color = (float4)clamp(dot(normal, lightDir), 0.0f, 1);
+      }
+      */
+      //1C
+      if (found) {
+          float4 normal = getNormalFromVolume(next, resolution, volumeData);
+          color = (float4)0.5f + 0.5f * dot(normal, lightDir);
+      }
   }
 
   if(id.x < width && id.y < height){
