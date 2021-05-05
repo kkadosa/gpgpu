@@ -58,14 +58,14 @@ __constant float eps = 0.000001f;
 __constant float albedo = 0.8f;
 __constant float densityScale = 1.0f;
 
-float getDensity(float4 p){
+float3 getDensity(float4 p){
   // oszlopok
   for(float ix = 0.3f; ix < 0.9f; ix += 0.4f){
     for(float iy = 0.3f; iy < 0.9f; iy += 0.4f){
       float px2 = (p.x - ix) * (p.x - ix);
       float py2 = (p.y - iy) * (p.y - iy);
       if( px2 + py2 < 0.001f){
-        return 100.0f;
+        return (float3)(100.0f, 0.0f, 100.0f);
       }
     }
   }
@@ -75,7 +75,7 @@ float getDensity(float4 p){
       float px2 = (p.x - ix) * (p.x - ix);
       float pz2 = (p.z - iz) * (p.z - iz);
       if( px2 + pz2 < 0.001f){
-        return 100.0f;
+          return (float3)(100.0f, 0.0f, 100.0f);
       }
     }
   }
@@ -85,21 +85,26 @@ float getDensity(float4 p){
       float pz2 = (p.z - iz) * (p.z - iz);
       float py2 = (p.y - iy) * (p.y - iy);
       if( pz2 + py2 < 0.001f){
-        return 100.0f;
+          return (float3)(100.0f, 0.0f, 100.0f);
       }
     }
+  }
+  
+  //big box in a corner
+  if (p.x < 0.5 && p.x > 0 && p.y < 0.5 && p.y > 0 && p.z < 0.5 && p.z > 0) {
+      return (float3)(100.0f, 100.0f, 100.0f);
   }
 
   // teto lyukkal
   if(p.y > 0.78f && p.y < 0.83f &&
      ( (p.x - 0.5f) * (p.x - 0.5f) + (p.z - 0.5f) * (p.z - 0.5f) ) > 0.001f)
-    return 100.0f;
+      return (float3)(0.0f, 0.0f, 0.0f);
 
 
   // falak
-  if(p.x < 0.02f) return 100.0f;
-  if(p.y < 0.02f) return 100.0f;
-  if(p.z > 0.98f) return 100.0f;
+  if(p.x < 0.02f) return (float3)(0.0f, 0.0f, 100.0f);
+  if(p.y < 0.02f) return (float3)(0.0f, 100.0f, 0.0f);
+  if(p.z > 0.98f) return (float3)(100.0f, 0.0f, 0.0f);
 
   // alul besurusodik
   if(p.y < 0.2f) return (1.0f - p.y) * 5.0f;
@@ -111,12 +116,12 @@ void tracePhotonRM(__global struct photon* p, float rnd){
   // simple linear
   //p->origin = p->origin + p->direction * 0.1f;
 
-  float s = -log(rnd) / densityScale;
+  float s = -log(rnd) * 3 / densityScale;
 
   float t = 0.0f;
   float dt = 1.0f / 256.0f;
   float sum = 0.0f;
-  float sigmat = 0.0f;
+  float3 sigmat = (float3)(0.0f);
 
   while(sum < s){
     float4 samplePos = p->origin + t * p->direction;
@@ -127,7 +132,7 @@ void tracePhotonRM(__global struct photon* p, float rnd){
       break;
     } else {
       sigmat = getDensity(samplePos);
-      sum += sigmat * dt;
+      sum += sigmat.x * dt + sigmat.y * dt + sigmat.z * dt;
       t += dt;
     }
   }
@@ -166,6 +171,8 @@ void simulation(const int iteration, __global uint4* seed, __global struct photo
   // scatter simulation
   if(0 == iteration || photons[id].energy < 0.2f){
     photons[id].origin = lightSourcePosition;
+    //2B: light originates from a 1x1 square, perpendiculat to the x axis, intersecting it in 1
+    //photons[id].origin = (float4)(1.0f, getRandom(&rng1, &rng2, &rng3, &rng4)-0.5f, getRandom(&rng1, &rng2, &rng3, &rng4) - 0.5f, 0.0f);
     photons[id].direction = getRandomDirection(&rng1, &rng2, &rng3, &rng4);
     photons[id].energy = 1.0f;
   } else {
@@ -244,8 +251,8 @@ void visualization(const int width, const int height, __global float4* visualiza
   eyeRay.direction.z = dot(temp, ((float4)(invViewMatrix.s8,invViewMatrix.s9,invViewMatrix.sA,invViewMatrix.sB)));
   eyeRay.direction.w = 0.0f;
 
-  float sum = 0.0f;
-  float transparency = 1.0f;
+  float3 sum = (float3)(0.0f);
+  float3 transparency = (float3)(1.0f, 1.0f, 1.0f);
 
   float tnear, tfar;
   int hit = intersectBox(eyeRay.origin, eyeRay.direction, boxMin, boxMax, &tnear, &tfar);
@@ -257,7 +264,7 @@ void visualization(const int width, const int height, __global float4* visualiza
 	for(int i=0; i < maxStep; ++i){
 		float4 pos = ((eyeRay.origin + t * eyeRay.direction) + 1.0f) / 2.0f;
 		float illumination = getIllumination(pos, resolution, simulationBuffer) / (iteration * 500) / (4.0f * M_PI) / pown(1.0f / resolution, 3) / albedo  * step;
-		float alpha = getDensity(pos) * step;
+		float3 alpha = getDensity(pos) * step;
 
 		sum = (1.0f-alpha) * sum + illumination;
         transparency *= (1-alpha);
@@ -269,9 +276,9 @@ void visualization(const int width, const int height, __global float4* visualiza
 
   if(id.x < width && id.y < height){
 	float4 sky = (float4)(0.17f, 0.4f, 0.6f, 0.0f);
-	sky = sky * transparency;
+	sky = sky * (float4)(transparency, 0.0f);
 
-	float4 tmpColor = sky + sum;
+	float4 tmpColor = sky + (float4)(sum, 0.0f);
 
 	float gamma = 0.8f;
 	tmpColor.x = pow(tmpColor.x, gamma);

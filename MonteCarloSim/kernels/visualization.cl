@@ -166,8 +166,21 @@ void alphaBlended(const int width, const int height, __global float4* visualizat
   float tnear, tfar;
   int hit = intersectBox(eyeRay.origin, eyeRay.direction, boxMin, boxMax, &tnear, &tfar);
   if(hit){
-	 // TODO
-     sum = (float4)(1.0f);
+      float4 step = eyeRay.direction / resolution;
+      float4 current = eyeRay.origin + eyeRay.direction * tfar;
+      float4 end = eyeRay.origin + eyeRay.direction * tnear;
+      float e = 3.0f / resolution;
+      
+      float dd = 0.0f;
+      do {
+          float density = getDensityFromVolume(current, resolution, volumeData);
+          float alpha = pow(density, alphaExponent) / resolution;
+          sum = (1 - alpha) * sum + alpha * (float4)(1.0);
+
+          float4 d = end - current;
+          dd = sqrt(d.x * d.x + d.z * d.z + d.y * d.y);
+          current -= step;
+      } while (dd < e);
   }
 
   if(id.x < width && id.y < height){
